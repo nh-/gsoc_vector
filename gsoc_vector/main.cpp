@@ -165,6 +165,47 @@ TYPED_TEST(fcv_basic_test, push_back_move)
 	ASSERT_EQ(true, std::equal(data, data + c, begin(expected)));
 }
 
+TYPED_TEST(fcv_basic_test, copy_constructor)
+{
+	const std::size_t c = 8;
+	TypeParam myvec(c);
+	
+	for(std::size_t i=0; i<c; ++i)
+		myvec.push_back(construct<TypeParam::value_type>(i));
+	
+	TypeParam myvec2(myvec);
+
+	ASSERT_EQ(myvec.capacity(), myvec2.capacity());
+	ASSERT_EQ(myvec.size(), myvec2.size());
+	auto data = myvec.data();
+	auto data2 = myvec2.data();
+	for(std::size_t i=0; i<myvec.size(); ++i)
+		ASSERT_EQ(data[i], data2[i]);
+}
+
+TYPED_TEST(fcv_basic_test, copy_assign)
+{
+	const std::size_t c = 8;
+	TypeParam myvec(c);
+
+	for(std::size_t i=0; i<c; ++i)
+		myvec.push_back(construct<TypeParam::value_type>(i));
+
+	TypeParam myvec2(c / 2);
+
+	ASSERT_EQ(c / 2, myvec2.capacity());
+	ASSERT_EQ(0, myvec2.size());
+
+	myvec2 = myvec;
+
+	ASSERT_EQ(myvec.capacity(), myvec2.capacity());
+	ASSERT_EQ(myvec.size(), myvec2.size());
+	auto data = myvec.data();
+	auto data2 = myvec2.data();
+	for(std::size_t i=0; i<myvec.size(); ++i)
+		ASSERT_EQ(data[i], data2[i]);
+}
+
 TYPED_TEST(fcv_basic_test, at)
 {
 	const std::size_t c = 8;

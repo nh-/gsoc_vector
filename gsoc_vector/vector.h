@@ -14,40 +14,7 @@
 #endif
 #define FCV_CONSTEXPR
 
-void* fcv_aligned_malloc(std::size_t alignment, std::size_t size)
-{
-	auto p = _aligned_malloc(size, alignment);
-	if(!p) throw std::bad_alloc();
-	return p;
-}
 
-void fcv_aligned_free(void* p)
-{
-	_aligned_free(p);
-}
-
-
-/*
-template<typename>
-class DummyAlloc {};
-
-struct ConstructionCapacity
-{
-	//typedef std::size_t size_type;
-	typedef unsigned int size_type;
-
-	ConstructionCapacity(size_type capacity) FCV_NOEXCEPT
-		: capacity_(capacity)
-	{
-	}
-
-	FCV_CONSTEXPR size_type capacity() FCV_NOEXCEPT { return capacity_; }
-	
-private:
-	size_type capacity_;
-	
-};
-*/
 
 
 template<
@@ -61,17 +28,57 @@ public:
 	typedef _Alloc allocator_type;
 	typedef unsigned int size_type;
 
-	fixed_capacity_vector(size_type _capacity)
-		: capacity_(_capacity), buffer_(nullptr)
+	explicit fixed_capacity_vector(size_type _capacity, const allocator_type& allocator = allocator_type())
+		: capacity_(0), allocator_(allocator), buffer_(nullptr), size_(0)
 	{
-		buffer_ = allocator_.allocate(capacity_);
+		_alloc(_capacity);
+	}
+
+	fixed_capacity_vector(const fixed_capacity_vector& other)
+		: capacity_(0), buffer_(nullptr), size_(0)
+		, allocator_(std::allocator_traits<allocator_type>::select_on_container_copy_construction(other.allocator_)) 
+	{
+		_alloc(other.capacity());
+		_copy_construct(other.size(), other.buffer_);
+	}
+
+	fixed_capacity_vector& operator=(const fixed_capacity_vector& other)
+	{
+		if(this != &other)
+		{
+			if(std::allocator_traits<allocator_type>::propagate_on_container_copy_assignment::value
+				&& allocator_ != other.allocator_)
+			{
+				clear();
+				_free();
+				allocator_ = other.allocator_;
+				_alloc(other.capacity());
+			}
+			else if(capacity_ != other.capacity())
+			{
+				clear();
+				_free();
+				_alloc(other.capacity());
+			}
+
+			if(size() >= other.size())
+			{
+				resize(other.size());
+				_copy_assign(other.size(), buffer_, other.buffer_);
+			}
+			else
+			{
+				_copy_assign(size(), buffer_, other.buffer_);
+				_copy_construct(other.size() - size(), other.buffer_ + size());
+			}
+		}
+		return *this;
 	}
 
 	~fixed_capacity_vector() FCV_NOEXCEPT
 	{
-		for(size_type i=0; i<size_; ++i)
-			allocator_.destroy(buffer_ + i);
-		allocator_.deallocate(buffer_, capacity_);
+		clear();
+		_free();
 	}
 
 	size_type capacity() const FCV_NOEXCEPT 
@@ -87,23 +94,15 @@ public:
 	void resize(size_type _size, const value_type& value = value_type())
 	{
 		if(_size > capacity_)
-			throw std::length_error("size would exceed capacity of fixed_capacity_vector");
+			throw std::length_error("size exceeds capacity of fixed_capacity_vector");
 
 		// shrink if new size is < current size
-		for(; size_ > _size; )
-		{
-			// destructors should not throw but in case one does, we still stay
-			// in a consistent state if we decrement size first
-			--size_; 
-			allocator_.destroy(buffer_ + size_);
-		}
+		for(; size() > _size; )
+			pop_back();
 
 		// grow if new size is > current size
-		for(; size_ < _size; ++size_)
-		{
-			allocator_.construct(buffer_ + size_, value);
-			// increment size after construction because constructors may throw
-		}
+		for(; size_ < _size; ++size_) // increment size after construction because constructors may throw
+			_emplace(buffer_ + size_, value);
 	}
 		
 	void push_back(const value_type& value)
@@ -111,7 +110,7 @@ public:
 		if(size_ == capacity_)
 			throw std::length_error("fixed_capacity_vector out of capacity");
 
-		allocator_.construct(buffer_ + size_, value);
+		_emplace(buffer_ + size_, value);
 		// modify size after copy to be consistent if copy-constructor throws
 		++size_;
 	}
@@ -121,9 +120,27 @@ public:
 		if(size_ == capacity_)
 			throw std::length_error("fixed_capacity_vector out of capacity");
 
-		allocator_.construct(buffer_ + size_, std::move(value));
+		_emplace(buffer_ + size_, std::move(value));
 		// modify size after move to be consistent if move-constructor throws
 		++size_;
+	}
+
+	void pop_back()
+	{
+		// TODO: 
+		{
+
+			// destructors should not throw but in case one does, we still stay
+			// in a consistent state if we decrement size first
+			--size_; 
+			_destroy(buffer_ + size_);
+		}
+	}
+
+	void clear()
+	{
+		for(; size(); )
+			pop_back();
 	}
 
 	value_type& at(size_type index)
@@ -159,9 +176,60 @@ public:
 	}
 	
 private:
-	const size_type capacity_;
-	allocator_type allocator_;
+	void _alloc(size_type _capacity)
+	{
+		assert(!buffer_);
+		buffer_ = _capacity ? std::allocator_traits<allocator_type>::allocate(allocator_, _capacity) : nullptr;
+		capacity_ = _capacity;
+	}
 
+	void _free()
+	{
+		if(capacity_)
+		{
+			assert(buffer_);
+			std::allocator_traits<allocator_type>::deallocate(allocator_, buffer_, capacity_);
+			capacity_ = 0;
+			buffer_ = nullptr;
+		}
+	}
+
+	void _copy_assign(size_type n, value_type* dst, const value_type* src)
+	{
+		for(; n > 0; --n)
+			*dst++ = *src++;
+	}
+
+	void _copy_construct(size_type n, const value_type* src)
+	{
+		assert(buffer_);
+		assert(size() + n <= capacity());
+		for(value_type* p = buffer_ + size(); n>0; --n, ++size_)
+			_emplace(p++, *src++);
+// 
+// 		for(; n > 0; --n)
+// 			_emplace(dst++, *src++);
+	}
+
+	template<
+		typename... _TyArgs
+	>
+	void _emplace(value_type* dst, _TyArgs&&... args)
+	{
+		assert(buffer_);
+		assert(dst < (buffer_ + capacity_));
+		std::allocator_traits<allocator_type>::construct(allocator_, dst, std::forward<_TyArgs>(args)...);
+	}
+
+	void _destroy(value_type* dst)
+	{
+		// TODO: 
+	}
+
+private:
+	// hottest stuff goes first
 	value_type* buffer_;
 	size_type size_;
+	size_type capacity_;
+	allocator_type allocator_;
 };
