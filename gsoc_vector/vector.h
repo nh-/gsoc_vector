@@ -1,10 +1,7 @@
 
 #pragma once
 
-#include <cstddef>
-#include <malloc.h>
 #include <exception>
-#include <vector>
 #include <cassert>
 
 #ifdef _MSC_VER
@@ -91,11 +88,21 @@ public:
 		return size_;
 	}
 
+	bool empty() const FCV_NOEXCEPT
+	{
+		return size() == 0;
+	}
+
+	static size_type max_size() FCV_NOEXCEPT
+	{
+		return std::allocator_traits<allocator_type>::max_size(allocator_);
+	}
+
 	void resize(size_type _size, const value_type& value = value_type())
 	{
 		if(_size > capacity_)
 			throw std::length_error("size exceeds capacity of fixed_capacity_vector");
-
+		
 		// shrink if new size is < current size
 		for(; size() > _size; )
 			pop_back();
@@ -127,13 +134,13 @@ public:
 
 	void pop_back()
 	{
-		// TODO: 
+		assert(!empty() && "pop_back() called on empty vector");
+		if(!empty())
 		{
-
 			// destructors should not throw but in case one does, we still stay
 			// in a consistent state if we decrement size first
-			--size_; 
-			_destroy(buffer_ + size_);
+ 			--size_;
+ 			_destroy(buffer_ + size_);
 		}
 	}
 
@@ -176,6 +183,8 @@ public:
 	}
 	
 private:
+	enum { _req_destruction = !std::is_scalar<value_type>::value };
+
 	void _alloc(size_type _capacity)
 	{
 		assert(!buffer_);
@@ -202,13 +211,10 @@ private:
 
 	void _copy_construct(size_type n, const value_type* src)
 	{
-		assert(buffer_);
+		assert(!buffer_ == !n);
 		assert(size() + n <= capacity());
 		for(value_type* p = buffer_ + size(); n>0; --n, ++size_)
 			_emplace(p++, *src++);
-// 
-// 		for(; n > 0; --n)
-// 			_emplace(dst++, *src++);
 	}
 
 	template<
@@ -223,11 +229,12 @@ private:
 
 	void _destroy(value_type* dst)
 	{
-		// TODO: 
+		assert(dst);
+		if(_req_destruction)
+			std::allocator_traits<allocator_type>::destroy(allocator_, dst);
 	}
 
 private:
-	// hottest stuff goes first
 	value_type* buffer_;
 	size_type size_;
 	size_type capacity_;
