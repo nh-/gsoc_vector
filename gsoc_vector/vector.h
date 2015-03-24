@@ -39,6 +39,15 @@ public:
 		_copy_construct(other.size(), other.buffer_);
 	}
 
+	fixed_capacity_vector(fixed_capacity_vector&& other) FCV_NOEXCEPT
+		// [allocator.requirements] requires allocator move not to throw
+		: capacity_(0), buffer_(nullptr), size_(0), allocator_(std::move(other.allocator_))
+	{
+		std::swap(capacity_, other.capacity_);
+		std::swap(buffer_, other.buffer_);
+		std::swap(size_, other.size_);
+	}
+
 	fixed_capacity_vector& operator=(const fixed_capacity_vector& other)
 	{
 		if(this != &other)
@@ -68,6 +77,25 @@ public:
 				_copy_assign(size(), buffer_, other.buffer_);
 				_copy_construct(other.size() - size(), other.buffer_ + size());
 			}
+		}
+		return *this;
+	}
+
+	fixed_capacity_vector& operator=(fixed_capacity_vector&& other)
+	{
+		if(this != &other)
+		{
+			clear();
+			_free();
+
+			if(std::allocator_traits<allocator_type>::propagate_on_container_move_assignment::value
+				&& allocator_ != other.allocator_)
+			{
+				allocator_ = std::move(other.allocator_);
+			}
+
+			assert(!size_ && !capacity_ && !buffer_);
+			_swap_state(*this, other);
 		}
 		return *this;
 	}
@@ -232,6 +260,13 @@ private:
 		assert(dst);
 		if(_req_destruction)
 			std::allocator_traits<allocator_type>::destroy(allocator_, dst);
+	}
+
+	void _swap_state(fixed_capacity_vector& lhs, fixed_capacity_vector& rhs) FCV_NOEXCEPT
+	{
+		std::swap(lhs.size_, rhs.size_);
+		std::swap(lhs.capacity_, rhs.capacity_);
+		std::swap(lhs.buffer_, rhs.buffer_);
 	}
 
 private:

@@ -1,5 +1,6 @@
 
 #include "vector.h"
+#include <vector>
 #include <array>
 #include <gtest/gtest.h>
 
@@ -411,6 +412,48 @@ TYPED_TEST(fcv_basic_test, copy_constructor)
 	}
 }
 
+TYPED_TEST(fcv_basic_test, move_constructor)
+{
+	typedef AllocatorMock<TypeParam::value_type> alloc_t;
+	typedef alloc_t::Statistics stats_t;
+
+	for(std::size_t c : { 0, 8 })
+	{
+		stats_t stats, expectedStats(c ? 1 : 0, 0, 0, 0);
+		{
+			TypeParam myvec(c, alloc_t(&stats));
+			// fill src vector
+			for(std::size_t i=0; i<c; ++i)
+				myvec.push_back(construct<TypeParam::value_type>(i));
+			expectedStats.ConstructCalls += c;
+			ASSERT_EQ(expectedStats, stats);
+
+			// copy vector
+			TypeParam myvec2(std::move(myvec));
+
+			// check capacity, size and content of old vector
+			ASSERT_EQ(0, myvec.capacity());
+			ASSERT_EQ(0, myvec.size());
+			ASSERT_EQ(nullptr, myvec.data());
+
+			// check capacity, size and content of new vector
+			ASSERT_EQ(c, myvec2.capacity());
+			ASSERT_EQ(c, myvec2.size());
+			auto data2 = myvec2.data();
+			for(std::size_t i=0; i<myvec2.size(); ++i)
+				ASSERT_EQ(construct<TypeParam::value_type>(i), data2[i]);
+
+			// check allocator calls
+			ASSERT_EQ(expectedStats, stats);
+		}
+
+		expectedStats.DestroyCalls = std::is_scalar<TypeParam::value_type>::value 
+			? 0 : expectedStats.ConstructCalls;
+		expectedStats.DeallocateCalls = c ? 1 : 0;
+		ASSERT_EQ(expectedStats, stats);
+	}
+}
+
 TYPED_TEST(fcv_basic_test, copy_assign)
 {
 	typedef AllocatorMock<TypeParam::value_type> alloc_t;
@@ -504,6 +547,80 @@ TYPED_TEST(fcv_basic_test, copy_assign)
 		expectedStats.ConstructCalls += myvec2.size();
 		ASSERT_EQ(expectedStats, stats);
 	}
+}
+
+TYPED_TEST(fcv_basic_test, move_assign)
+{
+	typedef AllocatorMock<TypeParam::value_type> alloc_t;
+	typedef alloc_t::Statistics stats_t;
+
+	stats_t stats, expectedStats(0, 0, 0, 0);
+	TypeParam myvec(0, alloc_t(&stats));
+	std::array<TypeParam::value_type, 8> expected;
+	for(std::size_t i=0; i<8; ++i)
+		expected[i] = construct<TypeParam::value_type>(i);
+
+	// 1. nonempty to empty
+	// 2. nonempty to nonempty
+	// 3. empty to nonempty
+	for(std::size_t c : { 8, 6, 0 })
+	{
+		TypeParam myvec2(c, alloc_t(&stats));
+		for(std::size_t i=0; i<(c/2); ++i)
+			myvec2.push_back(expected[i]);
+		expectedStats.AllocateCalls += (c ? 1 : 0);
+		expectedStats.ConstructCalls += (c/2);
+		ASSERT_EQ(expectedStats, stats);
+
+		auto oldCapacity = myvec.capacity();
+		auto oldSize = myvec.size();
+		myvec = std::move(myvec2);
+		expectedStats.DestroyCalls += 
+			std::is_scalar<TypeParam::value_type>::value ? 0 : oldSize;
+		expectedStats.DeallocateCalls += (oldCapacity ? 1 : 0);
+		ASSERT_EQ(expectedStats, stats);
+
+		// track destruction stats
+// 		expectedStats.DestroyCalls += myvec.size();
+// 		expectedStats.DeallocateCalls += (myvec.capacity() ? 1 : 0);
+	}
+
+// 	const std::size_t c = 8;
+// 	TypeParam myvec(c, alloc_t(&stats));
+// 
+// 	for(std::size_t i=0; i<(c/2); ++i)
+// 		myvec.push_back(construct<TypeParam::value_type>(i));
+// 	expectedStats.ConstructCalls += (c/2);
+// 
+// 
+// 
+// 	// assign vector of same capacity (smaller = larger)
+// 	{
+// 		TypeParam myvec2(c, alloc_t(&stats));
+// 		myvec2.push_back(construct<TypeParam::value_type>());
+// 		++expectedStats.AllocateCalls;
+// 		++expectedStats.ConstructCalls;
+// 		ASSERT_EQ(expectedStats, stats);
+// 		auto oldSize = myvec2.size();
+// 
+// 		myvec2 = myvec;
+// 		// check capacity, size and content
+// 		ASSERT_EQ(myvec.capacity(), myvec2.capacity());
+// 		ASSERT_EQ(myvec.size(), myvec2.size());
+// 		auto data = myvec.data();
+// 		auto data2 = myvec2.data();
+// 		for(std::size_t i=0; i<myvec.size(); ++i)
+// 			ASSERT_EQ(data[i], data2[i]);
+// 		// check allocator calls
+// 		expectedStats.ConstructCalls += (myvec.size() - oldSize);
+// 		ASSERT_EQ(expectedStats, stats);
+// 
+// 		// track stats for destruction of myvec2
+// 		expectedStats.DestroyCalls += 
+// 			std::is_scalar<TypeParam::value_type>::value ? 0 : myvec2.size();
+// 		++expectedStats.DeallocateCalls;
+// 	}
+
 }
 
 TYPED_TEST(fcv_basic_test, at)
