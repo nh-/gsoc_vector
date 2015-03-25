@@ -48,6 +48,17 @@ public:
 		std::swap(size_, other.size_);
 	}
 
+	fixed_capacity_vector(size_type capacity, const std::initializer_list<value_type>& il,
+		const allocator_type& allocator = allocator_type())
+		: capacity_(0), allocator_(allocator), buffer_(nullptr), size_(0)
+	{
+		if(il.size() > capacity)
+			throw std::length_error("size of initializer_list exceeds capacity of fixed_capacity_vector");
+
+		_alloc(capacity);
+		_copy_construct(il.size(), begin(il));
+	}
+
 	fixed_capacity_vector& operator=(const fixed_capacity_vector& other)
 	{
 		if(this != &other)
@@ -96,6 +107,24 @@ public:
 
 			assert(!size_ && !capacity_ && !buffer_);
 			_swap_state(*this, other);
+		}
+		return *this;
+	}
+
+	fixed_capacity_vector& operator=(const std::initializer_list<value_type>& il)
+	{
+		if(capacity() < il.size())
+			throw std::length_error("size of initializer_list exceeds capacity of fixed_capacity_vector");
+
+		if(il.size() <= size())
+		{
+			resize(il.size());
+			_copy_assign(il.size(), buffer_, begin(il));
+		}
+		else
+		{
+			_copy_assign(size(), buffer_, begin(il));
+			_copy_construct(il.size() - size(), begin(il) + size());
 		}
 		return *this;
 	}

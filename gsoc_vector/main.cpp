@@ -454,6 +454,49 @@ TYPED_TEST(fcv_basic_test, move_constructor)
 	}
 }
 
+TYPED_TEST(fcv_basic_test, initlist_constructor)
+{
+	typedef AllocatorMock<TypeParam::value_type> alloc_t;
+	typedef alloc_t::Statistics stats_t;
+
+	std::initializer_list<TypeParam::value_type> il{
+		construct<TypeParam::value_type>(0),
+		construct<TypeParam::value_type>(1),
+		construct<TypeParam::value_type>(2),
+		construct<TypeParam::value_type>(3)
+	};
+
+	stats_t stats, expectedStats(0, 0, 0, 0);
+
+	for(std::size_t c : { 4, 8, 2, 0 })
+	{
+		if(c >= il.size())
+		{
+			TypeParam myvec(c, il, alloc_t(&stats));
+			expectedStats.AllocateCalls += (c ? 1 : 0);
+			expectedStats.ConstructCalls += il.size();
+			// check capacity, size and content
+			ASSERT_EQ(c, myvec.capacity());
+			ASSERT_EQ(il.size(), myvec.size());
+			auto data = myvec.data();
+			for(std::size_t i=0; i<myvec.size(); ++i)
+				ASSERT_EQ(*(begin(il)+i), data[i]);
+			// check allocator mock
+			ASSERT_EQ(expectedStats, stats);
+
+			// track destructor calls
+			expectedStats.DestroyCalls += 
+				std::is_scalar<TypeParam::value_type>::value ? 0 : myvec.size();
+			expectedStats.DeallocateCalls += (c ? 1 : 0);
+		}
+		else
+		{
+			ASSERT_THROW(TypeParam myvec(c, il, alloc_t(&stats)), std::length_error);
+			ASSERT_EQ(expectedStats, stats);
+		}
+	}
+}
+
 TYPED_TEST(fcv_basic_test, copy_assign)
 {
 	typedef AllocatorMock<TypeParam::value_type> alloc_t;
@@ -579,48 +622,73 @@ TYPED_TEST(fcv_basic_test, move_assign)
 			std::is_scalar<TypeParam::value_type>::value ? 0 : oldSize;
 		expectedStats.DeallocateCalls += (oldCapacity ? 1 : 0);
 		ASSERT_EQ(expectedStats, stats);
-
-		// track destruction stats
-// 		expectedStats.DestroyCalls += myvec.size();
-// 		expectedStats.DeallocateCalls += (myvec.capacity() ? 1 : 0);
 	}
+}
 
-// 	const std::size_t c = 8;
-// 	TypeParam myvec(c, alloc_t(&stats));
-// 
-// 	for(std::size_t i=0; i<(c/2); ++i)
-// 		myvec.push_back(construct<TypeParam::value_type>(i));
-// 	expectedStats.ConstructCalls += (c/2);
-// 
-// 
-// 
-// 	// assign vector of same capacity (smaller = larger)
-// 	{
-// 		TypeParam myvec2(c, alloc_t(&stats));
-// 		myvec2.push_back(construct<TypeParam::value_type>());
-// 		++expectedStats.AllocateCalls;
-// 		++expectedStats.ConstructCalls;
-// 		ASSERT_EQ(expectedStats, stats);
-// 		auto oldSize = myvec2.size();
-// 
-// 		myvec2 = myvec;
-// 		// check capacity, size and content
-// 		ASSERT_EQ(myvec.capacity(), myvec2.capacity());
-// 		ASSERT_EQ(myvec.size(), myvec2.size());
-// 		auto data = myvec.data();
-// 		auto data2 = myvec2.data();
-// 		for(std::size_t i=0; i<myvec.size(); ++i)
-// 			ASSERT_EQ(data[i], data2[i]);
-// 		// check allocator calls
-// 		expectedStats.ConstructCalls += (myvec.size() - oldSize);
-// 		ASSERT_EQ(expectedStats, stats);
-// 
-// 		// track stats for destruction of myvec2
-// 		expectedStats.DestroyCalls += 
-// 			std::is_scalar<TypeParam::value_type>::value ? 0 : myvec2.size();
-// 		++expectedStats.DeallocateCalls;
-// 	}
+TYPED_TEST(fcv_basic_test, initlist_assign)
+{
+	typedef AllocatorMock<TypeParam::value_type> alloc_t;
+	typedef alloc_t::Statistics stats_t;
 
+	std::initializer_list<TypeParam::value_type> empty_il {};
+	std::initializer_list<TypeParam::value_type> small_il { construct<TypeParam::value_type>(0),  
+		construct<TypeParam::value_type>(1), construct<TypeParam::value_type>(2) };
+	std::initializer_list<TypeParam::value_type> medium_il { construct<TypeParam::value_type>(0),  
+		construct<TypeParam::value_type>(1), construct<TypeParam::value_type>(2),  
+		construct<TypeParam::value_type>(3), construct<TypeParam::value_type>(4) };
+	std::initializer_list<TypeParam::value_type> large_il { construct<TypeParam::value_type>(0),  
+		construct<TypeParam::value_type>(1), construct<TypeParam::value_type>(2),  
+		construct<TypeParam::value_type>(3), construct<TypeParam::value_type>(4),  
+		construct<TypeParam::value_type>(5), construct<TypeParam::value_type>(6) };
+	
+	std::array<TypeParam::value_type, 8> expected;
+
+	for(std::size_t c : { 0, 8 })
+	{
+		stats_t stats, expectedStats(c ? 1 : 0, 0, 0, 0);
+		TypeParam myvec(c, alloc_t(&stats));
+
+		for(const auto& il : { empty_il, medium_il, small_il, large_il, empty_il })
+		{
+			if(il.size() > c)
+			{
+				auto oldSize = myvec.size();
+				for(std::size_t i=0; i<oldSize; ++i)
+					expected[i] = myvec.data()[i];
+
+				ASSERT_EQ(expectedStats, stats);
+				ASSERT_THROW(myvec = il, std::length_error);
+				// check capacity, size and content is unchanged
+				ASSERT_EQ(c, myvec.capacity());
+				ASSERT_EQ(oldSize, myvec.size());
+				for(std::size_t i=0; i<myvec.size(); ++i)
+					ASSERT_EQ(expected[i], myvec.data()[i]);
+				// check no allocator mock calls have appeared
+				ASSERT_EQ(expectedStats, stats);
+			}
+			else
+			{
+				auto oldSize = myvec.size();
+				ASSERT_NO_THROW(myvec = il);
+				if(oldSize > il.size())
+				{
+					expectedStats.DestroyCalls += 
+						std::is_scalar<TypeParam::value_type>::value ? 0 : (oldSize - il.size());
+				}
+				if(oldSize < il.size())
+					expectedStats.ConstructCalls += (il.size() - oldSize);
+
+				// check capacity, size and content
+				ASSERT_EQ(c, myvec.capacity());
+				ASSERT_EQ(il.size(), myvec.size());
+				auto data = myvec.data();
+				for(std::size_t i=0; i<il.size(); ++i)
+					ASSERT_EQ(*(begin(il) + i), *(data + i));
+				// check allocator mock calls
+				ASSERT_EQ(expectedStats, stats);
+			}
+		}
+	}
 }
 
 TYPED_TEST(fcv_basic_test, at)
