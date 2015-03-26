@@ -3,6 +3,7 @@
 
 #include <exception>
 #include <cassert>
+#include <iterator>
 
 #ifdef _MSC_VER
 #define FCV_NOEXCEPT _NOEXCEPT
@@ -24,6 +25,10 @@ public:
 	typedef _Ty value_type;
 	typedef _Alloc allocator_type;
 	typedef unsigned int size_type;
+	typedef value_type* iterator;
+	typedef const value_type* const_iterator;
+	typedef std::reverse_iterator<iterator> reverse_iterator;
+	typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 
 	explicit fixed_capacity_vector(size_type _capacity, const allocator_type& allocator = allocator_type())
 		: capacity_(0), allocator_(allocator), buffer_(nullptr), size_(0)
@@ -43,9 +48,7 @@ public:
 		// [allocator.requirements] requires allocator move not to throw
 		: capacity_(0), buffer_(nullptr), size_(0), allocator_(std::move(other.allocator_))
 	{
-		std::swap(capacity_, other.capacity_);
-		std::swap(buffer_, other.buffer_);
-		std::swap(size_, other.size_);
+		_swap_state(*this, other);
 	}
 
 	fixed_capacity_vector(size_type capacity, const std::initializer_list<value_type>& il,
@@ -55,6 +58,7 @@ public:
 		if(il.size() > capacity)
 			throw std::length_error("size of initializer_list exceeds capacity of fixed_capacity_vector");
 
+		using std::begin;
 		_alloc(capacity);
 		_copy_construct(il.size(), begin(il));
 	}
@@ -116,6 +120,7 @@ public:
 		if(capacity() < il.size())
 			throw std::length_error("size of initializer_list exceeds capacity of fixed_capacity_vector");
 
+		using std::begin;
 		if(il.size() <= size())
 		{
 			resize(il.size());
@@ -129,6 +134,18 @@ public:
 		return *this;
 	}
 
+	void swap(fixed_capacity_vector& other) FCV_NOEXCEPT
+	{
+		// [allocator.requirements] requires allocator assign not to throw
+		if(this != &other)
+		{
+			using std::swap;
+			if(std::allocator_traits<allocator_type>::propagate_on_container_swap::value)
+				swap(allocator_, other.allocator_);
+			_swap_state(*this, other);
+		}
+	}
+		
 	~fixed_capacity_vector() FCV_NOEXCEPT
 	{
 		clear();
@@ -153,6 +170,66 @@ public:
 	static size_type max_size() FCV_NOEXCEPT
 	{
 		return std::allocator_traits<allocator_type>::max_size(allocator_);
+	}
+		
+	iterator begin() FCV_NOEXCEPT
+	{
+		return buffer_;
+	}
+
+	const_iterator begin() const FCV_NOEXCEPT
+	{
+		return cbegin();
+	}
+
+	iterator end() FCV_NOEXCEPT
+	{
+		return (buffer_ + size());
+	}
+
+	const_iterator end() const FCV_NOEXCEPT
+	{
+		return cend();
+	}
+
+	const_iterator cbegin() const FCV_NOEXCEPT
+	{
+		return buffer_;
+	}
+
+	const_iterator cend() const FCV_NOEXCEPT
+	{
+		return (buffer_ + size());
+	}
+	
+	reverse_iterator rbegin() FCV_NOEXCEPT
+	{
+		return _make_reverse_iter(end());
+	}
+
+	const_reverse_iterator rbegin() const FCV_NOEXCEPT
+	{
+		return crbegin();
+	}
+
+	reverse_iterator rend() FCV_NOEXCEPT
+	{
+		return _make_reverse_iter(begin());
+	}
+
+	const_reverse_iterator rend() const FCV_NOEXCEPT
+	{
+		return crend();
+	}
+
+	const_reverse_iterator crbegin() const FCV_NOEXCEPT
+	{
+		return _make_reverse_iter(end());
+	}
+
+	const_reverse_iterator crend() const FCV_NOEXCEPT
+	{
+		return _make_reverse_iter(begin());
 	}
 
 	void resize(size_type _size, const value_type& value = value_type())
@@ -201,10 +278,60 @@ public:
 		}
 	}
 
+	iterator insert(const_iterator pos, const value_type& value)
+	{
+		if(size() == capacity())
+			throw std::length_error("fixed_capacity_vector out of capacity");
+
+		_check_iterator(pos);
+		push_back(value);
+
+		auto p = const_cast<iterator>(pos);
+		std::rotate(rbegin(), rbegin() + 1, _make_reverse_iter(p));
+		return p;
+	}
+
+	iterator insert(const_iterator pos, value_type&& value)
+	{
+		if(size() == capacity())
+			throw std::length_error("fixed_capacity_vector out of capacity");
+
+		_check_iterator(pos);
+		push_back(std::move(value));
+
+		auto p = const_cast<iterator>(pos);
+		std::rotate(rbegin(), rbegin() + 1, _make_reverse_iter(p));
+		return p;	
+	}
+
 	void clear()
 	{
 		for(; size(); )
 			pop_back();
+	}
+
+	value_type& front()
+	{
+		assert(!empty() && "calling front() on empty container has undefined behavior");
+		return buffer_[0];
+	}
+
+	const value_type& front() const
+	{
+		assert(!empty() && "calling front() on empty container has undefined behavior");
+		return buffer_[0];		
+	}
+
+	value_type& back()
+	{		
+		assert(!empty() && "calling back() on empty container has undefined behavior");
+		return buffer_[size() - 1];
+	}
+
+	const value_type& back() const
+	{
+		assert(!empty() && "calling back() on empty container has undefined behavior");
+		return buffer_[size() - 1];	
 	}
 
 	value_type& at(size_type index)
@@ -298,9 +425,30 @@ private:
 		std::swap(lhs.buffer_, rhs.buffer_);
 	}
 
+	void _check_iterator(const_iterator iter) const
+	{
+		assert(iter >= begin() && iter <= end() && "iterator not valid");
+	}
+
+	template<typename _Iter>
+	std::reverse_iterator<_Iter> _make_reverse_iter(_Iter i) const FCV_NOEXCEPT
+	{
+		return std::reverse_iterator<_Iter>(i);
+	}
+
 private:
 	value_type* buffer_;
 	size_type size_;
 	size_type capacity_;
 	allocator_type allocator_;
 };
+
+
+template<
+	typename _Ty,
+	typename _Alloc
+>
+void swap(fixed_capacity_vector<_Ty, _Alloc>& lhs, fixed_capacity_vector<_Ty, _Alloc>& rhs) FCV_NOEXCEPT
+{
+	lhs.swap(rhs);
+}
