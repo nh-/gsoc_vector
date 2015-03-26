@@ -3,17 +3,15 @@
 
 #include <exception>
 #include <cassert>
+#include <memory>
 #include <iterator>
+#include <algorithm>
 
 #ifdef _MSC_VER
 #define FCV_NOEXCEPT _NOEXCEPT
 #else
-#error "TODO!"
+#define FCV_NOEXCEPT noexcept
 #endif
-#define FCV_CONSTEXPR
-
-
-
 
 template<
 	typename _Ty,
@@ -167,7 +165,7 @@ public:
 		return size() == 0;
 	}
 
-	static size_type max_size() FCV_NOEXCEPT
+	size_type max_size() const FCV_NOEXCEPT
 	{
 		return std::allocator_traits<allocator_type>::max_size(allocator_);
 	}
