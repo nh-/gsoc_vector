@@ -946,6 +946,50 @@ TYPED_TEST(fcv_basic_test, insert_move)
 	}
 }
 
+TYPED_TEST(fcv_basic_test, erase)
+{
+	typedef AllocatorMock<typename TypeParam::value_type> alloc_t;
+	typedef typename alloc_t::Statistics stats_t;
+
+	const std::size_t c = 8;
+	std::array<typename TypeParam::value_type, c> expected;
+	for(std::size_t i=0; i<c; ++i)
+		expected[i] = construct<typename TypeParam::value_type>(i);
+
+	for(std::size_t s : { 1, 4, 8 })
+	{
+		for(std::size_t offset : { 0, 1, 3, 6, 7 })
+		{
+			if(offset < s)
+			{
+				stats_t stats, expectedStats(1, 0, 0, 0);
+				TypeParam myvec(c, alloc_t(&stats));
+				for(std::size_t i=0; i<s; ++i)
+					myvec.push_back(expected[i]);
+				expectedStats.ConstructCalls += s;
+				ASSERT_EQ(expectedStats, stats);
+
+				auto ret = myvec.erase(myvec.begin() + offset);
+
+				// check capacity, size and content
+				ASSERT_EQ(c, myvec.capacity());
+				ASSERT_EQ(s-1, myvec.size());
+				for(std::size_t i=0; i<offset; ++i)
+					ASSERT_EQ(expected[i], myvec[i]);
+				for(std::size_t i=offset; i<myvec.size(); ++i)
+					ASSERT_EQ(expected[i+1], myvec[i]);
+				// check return value
+				ASSERT_EQ(myvec.begin() + offset, ret);
+				
+				// check allocator mock
+				expectedStats.DestroyCalls += 
+					std::is_scalar<typename TypeParam::value_type>::value ? 0 : 1;
+				ASSERT_EQ(expectedStats, stats);			
+			}		
+		}	
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	::testing::InitGoogleTest(&argc, argv);

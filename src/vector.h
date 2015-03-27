@@ -281,7 +281,7 @@ public:
 		if(size() == capacity())
 			throw std::length_error("fixed_capacity_vector out of capacity");
 
-		_check_iterator(pos);
+		_check_iterator(pos, true);
 		push_back(value);
 
 		auto p = const_cast<iterator>(pos);
@@ -294,11 +294,22 @@ public:
 		if(size() == capacity())
 			throw std::length_error("fixed_capacity_vector out of capacity");
 
-		_check_iterator(pos);
+		_check_iterator(pos, true);
 		push_back(std::move(value));
 
 		auto p = const_cast<iterator>(pos);
 		std::rotate(rbegin(), rbegin() + 1, _make_reverse_iter(p));
+		return p;	
+	}
+
+	iterator erase(const_iterator pos)
+	{
+		_check_iterator(pos, false);
+
+		auto p = const_cast<iterator>(pos);
+		std::rotate(p, p + 1, end());
+		pop_back();
+
 		return p;	
 	}
 
@@ -423,9 +434,10 @@ private:
 		std::swap(lhs.buffer_, rhs.buffer_);
 	}
 
-	void _check_iterator(const_iterator iter) const
+	void _check_iterator(const_iterator iter, bool include_end) const
 	{
-		assert(iter >= begin() && iter <= end() && "iterator not valid");
+		assert(iter >= begin() && (include_end ? (iter <= end()) : (iter < end()))
+			&& "iterator not valid");
 	}
 
 	template<typename _Iter>
